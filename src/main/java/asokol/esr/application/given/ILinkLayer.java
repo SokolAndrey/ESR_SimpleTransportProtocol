@@ -1,6 +1,4 @@
-package asokol.esr.application.client;
-
-import asokol.esr.application.server.IDataReceiveListener;
+package asokol.esr.application.given;
 
 public interface ILinkLayer {
 

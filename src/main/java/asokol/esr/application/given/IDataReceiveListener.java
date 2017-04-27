@@ -1,4 +1,4 @@
-package asokol.esr.application.server;
+package asokol.esr.application.given;
 
 public interface IDataReceiveListener {
 
@@ -6,4 +6,5 @@ public interface IDataReceiveListener {
    * @param data data from the lower layer.
    */
   void onData(byte[] data);
+
 }
