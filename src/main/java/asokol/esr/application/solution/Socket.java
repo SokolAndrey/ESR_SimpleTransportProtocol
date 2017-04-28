@@ -6,12 +6,17 @@ import asokol.esr.application.solution.message.ByeMessage;
 import asokol.esr.application.solution.message.DataMessage;
 import asokol.esr.application.solution.message.HelloMessage;
 import asokol.esr.application.solution.message.Message;
+import asokol.esr.application.solution.message.ResponseMessage;
 import lombok.val;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import static asokol.esr.application.solution.Constants.BATCH_SIZE;
 import static asokol.esr.application.solution.Constants.DATA_BATCH_SIZE;
@@ -22,11 +27,21 @@ public class Socket {
 
   private ReentrantLock lock;
   private short address;
-  private Map<Short, List<Short>> addressToIds;
-  private Map<Short, List<Message>> idToData;
+  private ConcurrentMap<Short, Boolean> packageNumberToResponse;
 
   private ILinkLayer linkLayer;
   private IDataReceiveListener receiveListener;
+
+  public Socket(short address,
+                ILinkLayer linkLayer,
+                IDataReceiveListener receiveListener
+  ) {
+    this.address = address;
+    this.linkLayer = linkLayer;
+    this.receiveListener = receiveListener;
+    lock = new ReentrantLock();
+    this.packageNumberToResponse = new ConcurrentHashMap<>();
+  }
 
   public void send(String data, short destinationAddress) {
 
@@ -49,22 +64,39 @@ public class Socket {
       throw new IllegalStateException("Message cannot be sent");
     }
 
-    val helloResponse = getHelloResponse();
+    val helloResponse = getResponse();
+    val messageId = helloResponse.getId();
 
-    // TODO(asokol): 4/26/17 validate response
-    validateHelloResponse(helloResponse);
-
+    val preparedData = generateDataMessages(batches, messageId);
     // Send each package and wait response. If there is something wrong with response send package again.
+    sendData(preparedData);
+
     // As soon as there is no batches, send ByeMessage.
-    while (!batches.isEmpty()) {
-      for (val batch : batches) {
-        sendDataMessage(batch);
-      }
+    sendByeMessage(messageId, (short) batches.size());
+    val byeResponse = getResponse();
+    // TODO(asokol): 4/27/17 close session?
+  }
+
+
+  public String getData(short senderAddress) {
+
+    subscribeSocket(senderAddress);
+    val message = (HelloMessage)receiveMessage();
+
+    if (!isHelloSent) {
+      throw new IllegalStateException("Message cannot be sent");
     }
 
-    sendByeMessage(address, destinationAddress, (short) batches.size());
-    val byeResponse = getByeResponse();
+    val helloResponse = getResponse();
+    val messageId = helloResponse.getId();
 
+    val preparedData = generateDataMessages(batches, messageId);
+    // Send each package and wait response. If there is something wrong with response send package again.
+    sendData(preparedData);
+
+    // As soon as there is no batches, send ByeMessage.
+    sendByeMessage(messageId, (short) batches.size());
+    val byeResponse = getResponse();
     // TODO(asokol): 4/27/17 close session?
   }
 
@@ -73,61 +105,76 @@ public class Socket {
     linkLayer.subscribeReceiveListener(this.receiveListener);
   }
 
+  private Message receiveMessage(){
+
+  }
+
+  /***************************************************************/
   /*********************HELLO MESSAGE*****************************/
+  /***************************************************************/
   private boolean sendHelloMessage(short from, short to, short batchCount) {
     val helloMessage = new HelloMessage(from, to, batchCount);
     return linkLayer.send(helloMessage.getBytes());
   }
 
-  private HelloMessage getHelloResponse() {
+  private ResponseMessage getResponse() {
     val incomingData = ByteBuffer.allocate(BATCH_SIZE).array();
-    HelloMessage incomingMessage;
+    ResponseMessage incomingMessage;
     lock.tryLock();
     try {
       receiveListener.onData(incomingData);
-      incomingMessage = new HelloMessage(incomingData);
+      incomingMessage = new ResponseMessage(incomingData);
     } finally {
       lock.unlock();
     }
     return incomingMessage;
   }
 
-  private void validateHelloResponse(HelloMessage helloResponse) {
-    throw new UnsupportedOperationException("Not implemented yet");
-  }
-
+  /***************************************************************/
   /*********************DATA MESSAGE*****************************/
-  private boolean sendDataMessage(byte[] batch) {
-    throw new UnsupportedOperationException("Not implemented yet");
+  /***************************************************************/
+  private boolean sendDataMessage(DataMessage dataMessage) {
+    return linkLayer.send(dataMessage.getBytes());
   }
 
-  private DataMessage getDataResponse() {
-    throw new UnsupportedOperationException("Not implemented yet");
+  private void sendData(List<DataMessage> dataMessages) {
+    listenResponses();
+    List<DataMessage> notConfirmedData = dataMessages;
+    while (packageNumberToResponse.containsValue(false)) {
+      notConfirmedData.forEach(this::sendDataMessage);
+      notConfirmedData = packageNumberToResponse.entrySet()
+          .stream()
+          .filter(Map.Entry::getValue)
+          .map(entry -> dataMessages.get(entry.getKey()))
+          .collect(Collectors.toList());
+    }
   }
 
-  private void validateDataResponse(DataMessage dataMessage) {
-    throw new UnsupportedOperationException("Not implemented yet");
+  private List<DataMessage> generateDataMessages(List<byte[]> batches, short messageId) {
+    List<DataMessage> dataMessages = new ArrayList<>(batches.size());
+    for (int i = 0; i < batches.size(); i++) {
+      dataMessages.add(new DataMessage(messageId, (short) i, batches.get(i)));
+      packageNumberToResponse.putIfAbsent((short) i, false);
+    }
+    return dataMessages;
   }
 
-  private byte[] prepareDataBatch(byte[] dataBatch, short address, short batchNumber) {
-    return ByteBuffer.allocate(BATCH_SIZE)
-        .putShort(address)
-        .putShort(batchNumber)
-        .put(dataBatch, 0, dataBatch.length)
-        .array();
+  private void listenResponses() {
+    new Thread(() -> {
+      while (packageNumberToResponse.containsValue(false)) {
+        val response = getResponse();
+        if (packageNumberToResponse.containsKey(response.getId())) {
+          packageNumberToResponse.replace(response.getId(), true);
+        }
+      }
+    }).run();
   }
 
-  /*********************BYE MESSAGE******************************/
-  private boolean sendByeMessage(short from, short to, short batchCount) {
-    throw new UnsupportedOperationException("Not implemented yet");
-  }
-
-  private ByeMessage getByeResponse() {
-    throw new UnsupportedOperationException("Not implemented yet");
-  }
-
-  private void validateByeResponse(ByeMessage byeMessage) {
-    throw new UnsupportedOperationException("Not implemented yet");
+  /***************************************************************/
+  /*********************BYE MESSAGE*****************************/
+  /***************************************************************/
+  private boolean sendByeMessage(short messageId, short batchCount) {
+    return linkLayer.send(new ByeMessage().getBytes());
   }
 
 }

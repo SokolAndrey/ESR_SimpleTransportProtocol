@@ -6,4 +6,10 @@ public interface Message {
 
   byte[] getBytes();
 
+  enum MessageType {
+    HELLO_MESSAGE,
+    DATA_MESSAGE,
+    BYE_MESSAGE,
+    RESPONSE_MESSAGE
+  }
 }

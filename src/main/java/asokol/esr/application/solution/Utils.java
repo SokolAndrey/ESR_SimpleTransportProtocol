@@ -1,5 +1,6 @@
 package asokol.esr.application.solution;
 
+import asokol.esr.application.solution.message.DataMessage;
 import lombok.val;
 
 import java.nio.ByteBuffer;
@@ -18,7 +19,7 @@ public class Utils {
     int numberOfBatches = dataInBytes.length % DATA_BATCH_SIZE == 0 ?
         dataInBytes.length / DATA_BATCH_SIZE :
         dataInBytes.length / DATA_BATCH_SIZE + 1;
-    val batches = new ArrayList<byte[]>(numberOfBatches);
+    List<byte[]> batches = new ArrayList<>(numberOfBatches);
     for (int i = 0; i < numberOfBatches; i++) {
       byte[] currentBatch = ByteBuffer.allocate(DATA_BATCH_SIZE).array();
       System.arraycopy(dataInBytes, DATA_BATCH_SIZE * i, currentBatch, 0, DATA_BATCH_SIZE);

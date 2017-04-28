@@ -37,7 +37,7 @@ public class HelloMessage implements Message {
     batchCount = parseShort(data, BATCH_COUNT_INDEX);
     checkSum = data[CHECK_SUM_INDEX];
     if (generateCheckSum() != checkSum) {
-      throw new IllegalStateException("Check sum do not match");
+      throw new IllegalStateException("Check sums do not match");
     }
   }
 

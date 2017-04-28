@@ -1,17 +1,22 @@
 package asokol.esr.application.solution.message;
 
-import lombok.Builder;
+import java.nio.ByteBuffer;
 
-@Builder
+import static asokol.esr.application.solution.Constants.BATCH_SIZE;
+
 public class ByeMessage implements Message {
   private short id;
+  private byte checkSum;
 
   public MessageType getMessageType() {
     return MessageType.BYE_MESSAGE;
   }
 
   public byte[] getBytes() {
-    return new byte[0];
+    return ByteBuffer.allocate(BATCH_SIZE)
+        .putShort(id)
+        .put(generateCheckSum())
+        .array();
   }
 
   private byte generateCheckSum() {
