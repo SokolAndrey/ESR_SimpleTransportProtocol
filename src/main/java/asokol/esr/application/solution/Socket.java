@@ -5,7 +5,6 @@ import asokol.esr.application.given.ILinkLayer;
 import asokol.esr.application.solution.message.ByeMessage;
 import asokol.esr.application.solution.message.DataMessage;
 import asokol.esr.application.solution.message.HelloMessage;
-import asokol.esr.application.solution.message.Message;
 import asokol.esr.application.solution.message.ResponseMessage;
 import lombok.val;
 
@@ -72,7 +71,7 @@ public class Socket {
     sendData(preparedData);
 
     // As soon as there is no batches, send ByeMessage.
-    sendByeMessage(messageId, (short) batches.size());
+    sendByeMessage(messageId);
     val byeResponse = getResponse();
     // TODO(asokol): 4/27/17 close session?
   }
@@ -81,32 +80,80 @@ public class Socket {
   public String getData(short senderAddress) {
 
     subscribeSocket(senderAddress);
-    val message = (HelloMessage)receiveMessage();
+    val helloMessage = receiveHelloMessage();
+    feelMap(helloMessage);
+    sendResponse((short) 0);
+    val incomingData = receiveData();
+    val byeMessage = receiveByeMessage();
+    sendResponse(byeMessage.getId());
+    return parseString(incomingData);
+  }
 
-    if (!isHelloSent) {
-      throw new IllegalStateException("Message cannot be sent");
+  /**
+   * Parse {@link String} from incoming data.
+   *
+   * @param incomingData byte array.
+   * @return Sent message.
+   */
+  private String parseString(List<DataMessage> incomingData) {
+    byte[] result = ByteBuffer.allocate(incomingData.size() * DATA_BATCH_SIZE).array();
+    for (int i = 0; i < incomingData.size(); i++) {
+      for (int j = 0; j < DATA_BATCH_SIZE; j++) {
+        byte[] data = incomingData.get(i).getDataChunk();
+        result[DATA_BATCH_SIZE * i + j] = data[j];
+      }
     }
+    return new String(result);
+  }
 
-    val helloResponse = getResponse();
-    val messageId = helloResponse.getId();
+  /**
+   * Receive all batches with data.
+   *
+   * @return {@link List} of {@link DataMessage}.
+   */
+  private List<DataMessage> receiveData() {
+    List<DataMessage> dataMessageList = new ArrayList<>(packageNumberToResponse.size());
+    while (packageNumberToResponse.containsValue(false)) {
+      byte[] incomingData = ByteBuffer.allocate(BATCH_SIZE).array();
+      receiveListener.onData(incomingData);
+      val dataMessage = new DataMessage(incomingData);
+      if (packageNumberToResponse.containsKey(dataMessage.getId())) {
+        if (!packageNumberToResponse.get(dataMessage.getId())) {
+          dataMessageList.add(dataMessage);
+          packageNumberToResponse.replace(dataMessage.getId(), true);
+          sendResponse(dataMessage.getBatchNumber());
+        }
+      }
+    }
+    return dataMessageList;
+  }
 
-    val preparedData = generateDataMessages(batches, messageId);
-    // Send each package and wait response. If there is something wrong with response send package again.
-    sendData(preparedData);
+  /**
+   * Send response message for each received message.
+   *
+   * @param batchNumber the number of package.
+   */
+  private void sendResponse(short batchNumber) {
+    val responseMessage = new ResponseMessage((short) 0, batchNumber);
+    linkLayer.send(responseMessage.getBytes());
+  }
 
-    // As soon as there is no batches, send ByeMessage.
-    sendByeMessage(messageId, (short) batches.size());
-    val byeResponse = getResponse();
-    // TODO(asokol): 4/27/17 close session?
+  /**
+   * To know how much messages we are expecting to receive.
+   *
+   * @param helloMessage here contains information about the number of batches.
+   */
+  private void feelMap(HelloMessage helloMessage) {
+    short batchCount = helloMessage.getBatchCount();
+    packageNumberToResponse = new ConcurrentHashMap<>(batchCount);
+    for (short i = 0; i < batchCount; i++) {
+      packageNumberToResponse.put(i, false);
+    }
   }
 
   private void subscribeSocket(short address) {
     // TODO(asokol): 4/25/17 subscribe destination listener?
     linkLayer.subscribeReceiveListener(this.receiveListener);
-  }
-
-  private Message receiveMessage(){
-
   }
 
   /***************************************************************/
@@ -124,6 +171,19 @@ public class Socket {
     try {
       receiveListener.onData(incomingData);
       incomingMessage = new ResponseMessage(incomingData);
+    } finally {
+      lock.unlock();
+    }
+    return incomingMessage;
+  }
+
+  private HelloMessage receiveHelloMessage() {
+    val incomingData = ByteBuffer.allocate(BATCH_SIZE).array();
+    HelloMessage incomingMessage;
+    lock.tryLock();
+    try {
+      receiveListener.onData(incomingData);
+      incomingMessage = new HelloMessage(incomingData);
     } finally {
       lock.unlock();
     }
@@ -170,11 +230,38 @@ public class Socket {
     }).run();
   }
 
+  private DataMessage receiveDataMessage() {
+    val incomingData = ByteBuffer.allocate(BATCH_SIZE).array();
+    DataMessage incomingMessage;
+    lock.tryLock();
+    try {
+      receiveListener.onData(incomingData);
+      incomingMessage = new DataMessage(incomingData);
+    } finally {
+      lock.unlock();
+    }
+    return incomingMessage;
+  }
+
+
   /***************************************************************/
   /*********************BYE MESSAGE*****************************/
   /***************************************************************/
-  private boolean sendByeMessage(short messageId, short batchCount) {
-    return linkLayer.send(new ByeMessage().getBytes());
+  private boolean sendByeMessage(short messageId) {
+    return linkLayer.send(new ByeMessage(messageId).getBytes());
+  }
+
+  private ByeMessage receiveByeMessage() {
+    val incomingData = ByteBuffer.allocate(BATCH_SIZE).array();
+    ByeMessage incomingMessage;
+    lock.tryLock();
+    try {
+      receiveListener.onData(incomingData);
+      incomingMessage = new ByeMessage(incomingData);
+    } finally {
+      lock.unlock();
+    }
+    return incomingMessage;
   }
 
 }

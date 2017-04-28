@@ -1,13 +1,23 @@
 package asokol.esr.application.solution.message;
 
+import asokol.esr.application.solution.Constants;
 import lombok.Getter;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 import static asokol.esr.application.solution.Constants.BATCH_SIZE;
+import static asokol.esr.application.solution.Utils.parseShort;
 
 @Getter
 public class DataMessage implements Message {
+
+  private static int ID_INDEX = 0;
+  private static int BATCH_NUMBER_INDEX = 2;
+  private static int CHECK_SUM_INDEX = 4;
+  private static int DATA_INDEX = 5;
+
+
   private short id;
   private short batchNumber;
   private byte checkSum;
@@ -18,6 +28,20 @@ public class DataMessage implements Message {
     this.batchNumber = batchNumber;
     this.dataChunk = dataChunk;
     this.checkSum = generateCheckSum();
+  }
+
+  public DataMessage(byte[] data) {
+    if (data.length != Constants.BATCH_SIZE) {
+      throw new IllegalArgumentException("Incorrect data size");
+    }
+
+    this.id = parseShort(data, ID_INDEX);
+    this.batchNumber = parseShort(data, BATCH_NUMBER_INDEX);
+    this.checkSum = data[CHECK_SUM_INDEX];
+    if (generateCheckSum() != checkSum) {
+      throw new IllegalStateException("Check sums do not match");
+    }
+    this.dataChunk = Arrays.copyOfRange(data, DATA_INDEX, data.length - 1);
   }
 
   public MessageType getMessageType() {
