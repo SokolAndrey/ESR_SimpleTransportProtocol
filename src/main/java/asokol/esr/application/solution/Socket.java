@@ -223,8 +223,8 @@ public class Socket {
     new Thread(() -> {
       while (packageNumberToResponse.containsValue(false)) {
         val response = getResponse();
-        if (packageNumberToResponse.containsKey(response.getId())) {
-          packageNumberToResponse.replace(response.getId(), true);
+        if (packageNumberToResponse.containsKey(response.getMessageNumber())) {
+          packageNumberToResponse.replace(response.getMessageNumber(), true);
         }
       }
     }).run();
